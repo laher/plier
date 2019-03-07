@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chbmuc/cec"
+	"github.com/donniet/cec"
 	"github.com/jroimartin/gocui"
 )
 
@@ -21,6 +21,13 @@ var (
 	walkDir     = flag.Bool("walk", true, "walk dir (rather than ls dir)")
 	onlyMedia   = flag.Bool("only-media", true, fmt.Sprintf("only list media files (%v)", omxFiletypes))
 )
+
+type app struct {
+	pwd          string
+	writer       io.Writer
+	walkDir      bool
+	commandsChan chan *cec.Command
+}
 
 func main() {
 	flag.Parse()
@@ -38,6 +45,10 @@ func main() {
 		if err == nil {
 			go c.PowerOn(0)
 		}
+		ch := make(chan *cec.Command)
+		a.commandsChan = ch
+		c.Commands = ch
+		go a.pollCommands()
 	}
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
@@ -137,12 +148,6 @@ func cursorUp(g *gocui.Gui, v *gocui.View) error {
 	return nil
 }
 
-type app struct {
-	pwd     string
-	writer  io.Writer
-	walkDir bool
-}
-
 var omxFiletypes = []string{".mkv", ".mp4", ".m4v", ".avi", "mp3"}
 
 func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
@@ -210,6 +215,12 @@ func (a *app) refreshSide(v *gocui.View) error {
 	}
 	v.SetCursor(0, 0)
 	return nil
+}
+
+func (a *app) pollCommands() {
+	for c := range a.commandsChan {
+		log.Printf("command: %+v", c)
+	}
 }
 
 const maxDirs = 50
