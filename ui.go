@@ -114,6 +114,8 @@ type app struct {
 	pwd string
 }
 
+var omxFiletypes = []string{".mkv", ".mp4", ".m4v", ".avi"}
+
 func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 	if v != nil {
 		switch v.Name() {
@@ -124,10 +126,12 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 				return err
 			}
 			exe := "xdg-open"
-			if strings.HasSuffix(item, ".mkv") {
-				exe = "omxplayer"
+			for _, ft := range omxFiletypes {
+				if strings.HasSuffix(item, ft) {
+					exe = "omxplayer"
+				}
 			}
-			cmd := exec.Command("xdg-open", filepath.Join(a.pwd, item))
+			cmd := exec.Command(exe, filepath.Join(a.pwd, item))
 			err = cmd.Start()
 			if err != nil {
 				return err
