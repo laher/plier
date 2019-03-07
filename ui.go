@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -13,32 +15,41 @@ import (
 	"github.com/jroimartin/gocui"
 )
 
+var (
+	mediaPlayer = flag.String("media-player", "omxplayer", "media player executable for movies etc")
+	useCec      = flag.Bool("cec", true, "use cec for HDMI support")
+)
+
 func main() {
+	flag.Parse()
 	w, err := os.Create("/tmp/plier.log")
 	if err != nil {
 		log.Panicln(err)
 	}
-	c, err := cec.Open("", "cec.go")
-	if err != nil {
-		log.Panicln(err)
-	}
 	log.SetOutput(w)
-	go c.PowerOn(0)
+	a := &app{}
+	if *useCec {
+		c, err := cec.Open("", "cec.go")
+		if err != nil {
+			log.Println("Error starting cec:", err)
+		}
+		if err == nil {
+			go c.PowerOn(0)
+		}
+	}
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
 		log.Panicln(err)
 	}
 	defer g.Close()
-	pwd := ""
-	if len(os.Args) > 1 {
-		pwd = os.Args[1]
+	if len(flag.Args()) > 0 {
+		a.pwd = flag.Args()[0]
 	} else {
-		pwd, err = os.Getwd()
+		a.pwd, err = os.Getwd()
 		if err != nil {
 			log.Panicln(err)
 		}
 	}
-	a := &app{pwd: pwd}
 	g.SetManagerFunc(a.layout)
 	if err := setKeybindings(g, a); err != nil {
 		log.Panicln(err)
@@ -49,11 +60,25 @@ func main() {
 }
 
 func nextView(g *gocui.Gui, v *gocui.View) error {
+	v.SelBgColor = gocui.ColorWhite
 	if v == nil || v.Name() == "side" {
-		_, err := g.SetCurrentView("main")
+		if _, err := g.SetCurrentView("main"); err != nil {
+			return err
+		}
+
+		mv, err := g.View("main")
+		if err == nil {
+			mv.SelBgColor = gocui.ColorBlue
+		}
 		return err
 	}
-	_, err := g.SetCurrentView("side")
+	if _, err := g.SetCurrentView("side"); err != nil {
+		return err
+	}
+	sv, err := g.View("side")
+	if err == nil {
+		sv.SelBgColor = gocui.ColorBlue
+	}
 	return err
 }
 
@@ -111,10 +136,11 @@ func cursorUp(g *gocui.Gui, v *gocui.View) error {
 }
 
 type app struct {
-	pwd string
+	pwd    string
+	writer io.Writer
 }
 
-var omxFiletypes = []string{".mkv", ".mp4", ".m4v", ".avi"}
+var omxFiletypes = []string{".mkv", ".mp4", ".m4v", ".avi", "mp3"}
 
 func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 	if v != nil {
@@ -128,10 +154,15 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 			exe := "xdg-open"
 			for _, ft := range omxFiletypes {
 				if strings.HasSuffix(item, ft) {
-					exe = "omxplayer"
+					exe = *mediaPlayer
 				}
 			}
 			cmd := exec.Command(exe, filepath.Join(a.pwd, item))
+			a.writer, err = cmd.StdinPipe()
+			if err != nil {
+				return err
+			}
+
 			err = cmd.Start()
 			if err != nil {
 				return err
@@ -211,7 +242,6 @@ func (a *app) layout(g *gocui.Gui) error {
 			return err
 		}
 		v.Highlight = true
-		v.SelBgColor = gocui.ColorGreen
 		v.SelFgColor = gocui.ColorBlack
 		a.refreshMain(v)
 	}
