@@ -9,10 +9,21 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chbmuc/cec"
 	"github.com/jroimartin/gocui"
 )
 
 func main() {
+	w, err := os.Create("/tmp/plier.log")
+	if err != nil {
+		log.Panicln(err)
+	}
+	c, err := cec.Open("", "cec.go")
+	if err != nil {
+		log.Panicln(err)
+	}
+	log.SetOutput(w)
+	go c.PowerOn(0)
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
 		log.Panicln(err)
@@ -112,12 +123,15 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 			if err != nil {
 				return err
 			}
-			cmd := exec.Command("xdg-open", []string{filepath.Join(a.pwd, item)}...)
+			exe := "xdg-open"
+			if strings.HasSuffix(item, ".mkv") {
+				exe = "omxplayer"
+			}
+			cmd := exec.Command("xdg-open", filepath.Join(a.pwd, item))
 			err = cmd.Start()
 			if err != nil {
 				return err
 			}
-			//fmt.Println("Item selected:", item)
 		case "side":
 			_, y := v.Cursor()
 			item, err := v.Line(y)
