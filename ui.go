@@ -18,6 +18,8 @@ import (
 var (
 	mediaPlayer = flag.String("media-player", "omxplayer", "media player executable for movies etc")
 	useCec      = flag.Bool("cec", true, "use cec for HDMI support")
+	walkDir     = flag.Bool("walk", true, "walk dir (rather than ls dir)")
+	onlyMedia   = flag.Bool("only-media", true, fmt.Sprintf("only list media files (%v)", omxFiletypes))
 )
 
 func main() {
@@ -27,7 +29,7 @@ func main() {
 		log.Panicln(err)
 	}
 	log.SetOutput(w)
-	a := &app{}
+	a := &app{walkDir: *walkDir}
 	if *useCec {
 		c, err := cec.Open("", "cec.go")
 		if err != nil {
@@ -136,8 +138,9 @@ func cursorUp(g *gocui.Gui, v *gocui.View) error {
 }
 
 type app struct {
-	pwd    string
-	writer io.Writer
+	pwd     string
+	writer  io.Writer
+	walkDir bool
 }
 
 var omxFiletypes = []string{".mkv", ".mp4", ".m4v", ".avi", "mp3"}
@@ -157,7 +160,10 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 					exe = *mediaPlayer
 				}
 			}
-			cmd := exec.Command(exe, filepath.Join(a.pwd, item))
+			if !a.walkDir {
+				item = filepath.Join(a.pwd, item)
+			}
+			cmd := exec.Command(exe, item)
 			a.writer, err = cmd.StdinPipe()
 			if err != nil {
 				return err
@@ -206,12 +212,55 @@ func (a *app) refreshSide(v *gocui.View) error {
 	return nil
 }
 
+const maxDirs = 50
+
+func (a *app) walkMain(v *gocui.View) error {
+	dirCount := 0
+	err := filepath.Walk(a.pwd, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", path, err)
+			return err
+		}
+		if info.IsDir() && strings.HasPrefix(info.Name(), ".") {
+			//fmt.Printf("skipping a dir without errors: %+v \n", info.Name())
+			return filepath.SkipDir
+		}
+		if info.IsDir() {
+			dirCount++
+			if dirCount > maxDirs {
+				return filepath.SkipDir
+			}
+		}
+		if !info.IsDir() && !strings.HasPrefix(info.Name(), ".") {
+			if *onlyMedia {
+				for _, ft := range omxFiletypes {
+					if strings.HasSuffix(info.Name(), ft) {
+						fmt.Fprintln(v, path)
+						break
+					}
+				}
+			} else {
+				fmt.Fprintln(v, path)
+			}
+		}
+		return nil
+	})
+	return err
+}
+
 func (a *app) refreshMain(v *gocui.View) error {
+	v.Clear()
+	if a.walkDir {
+		return a.walkMain(v)
+	}
+	return a.lsMain(v)
+}
+
+func (a *app) lsMain(v *gocui.View) error {
 	files, err := ioutil.ReadDir(a.pwd)
 	if err != nil {
 		return err
 	}
-	v.Clear()
 	for _, f := range files {
 		if !f.IsDir() && !strings.HasPrefix(f.Name(), ".") {
 			fmt.Fprintln(v, f.Name())
