@@ -242,7 +242,20 @@ func (a *app) pollKeys() {
 }
 func (a *app) pollMessages() {
 	for c := range a.messagesChan {
-		log.Printf("plier - cec message rx: %+v", c)
+		if strings.HasPrefix(c, ">> ") {
+			log.Printf("plier - cec message rx: %+v", c)
+			parts := strings.Split(c[3:], ":")
+			if len(parts) == 3 {
+				switch parts[1] {
+				case "44":
+					log.Printf("Key pressed: %s", parts[2])
+				case "45":
+					log.Printf("Key released: %s", parts[2])
+				case "82":
+					log.Printf("Active source: %s", parts[2])
+				}
+			}
+		}
 	}
 }
 
