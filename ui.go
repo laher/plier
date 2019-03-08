@@ -28,6 +28,7 @@ type app struct {
 	walkDir      bool
 	commandsChan chan *cec.Command
 	keysChan     chan int
+	messagesChan chan string
 }
 
 func main() {
@@ -54,6 +55,11 @@ func main() {
 		chKeys := make(chan int)
 		a.keysChan = chKeys
 		c.KeyPresses = chKeys
+		go a.pollKeys()
+
+		chMessages := make(chan string)
+		a.messagesChan = chMessages
+		c.Messages = chMessages
 		go a.pollKeys()
 	}
 	g, err := gocui.NewGui(gocui.OutputNormal)
@@ -225,13 +231,18 @@ func (a *app) refreshSide(v *gocui.View) error {
 
 func (a *app) pollCommands() {
 	for c := range a.commandsChan {
-		log.Printf("command: %+v", c)
+		log.Printf("plier - cec command rx: %+v", c)
 	}
 }
 
 func (a *app) pollKeys() {
 	for c := range a.keysChan {
-		log.Printf("key press: %+v", c)
+		log.Printf("plier - key press rx: %+v", c)
+	}
+}
+func (a *app) pollMessages() {
+	for c := range a.keysChan {
+		log.Printf("plier - cec message rx: %+v", c)
 	}
 }
 
