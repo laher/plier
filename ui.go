@@ -241,7 +241,7 @@ func (a *app) pollKeys() {
 	}
 }
 func (a *app) pollMessages() {
-	for c := range a.keysChan {
+	for c := range a.messagesChan {
 		log.Printf("plier - cec message rx: %+v", c)
 	}
 }
