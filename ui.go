@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jroimartin/gocui"
 	"github.com/laher/cec"
@@ -29,6 +30,8 @@ type app struct {
 	commandsChan chan *cec.Command
 	keysChan     chan int
 	messagesChan chan string
+
+	cec *cec.Connection
 }
 
 func main() {
@@ -40,27 +43,34 @@ func main() {
 	log.SetOutput(w)
 	a := &app{walkDir: *walkDir}
 	if *useCec {
-		c, err := cec.Open("", "cec.go")
-		if err != nil {
-			log.Panicln("Error starting cec:", err)
-		}
-		if err == nil {
-			go c.PowerOn(0)
-		}
-		ch := make(chan *cec.Command)
-		a.commandsChan = ch
-		c.Commands = ch
-		go a.pollCommands()
+		go func() {
+			a.cec, err = cec.Open("", "cec.go")
+			if err != nil {
+				log.Panicln("Error starting cec:", err)
+			}
+			if err == nil {
+				go a.cec.PowerOn(0)
+			}
+			ch := make(chan *cec.Command)
+			a.commandsChan = ch
+			a.cec.Commands = ch
+			go a.pollCommands()
 
-		chKeys := make(chan int)
-		a.keysChan = chKeys
-		c.KeyPresses = chKeys
-		go a.pollKeys()
+			chKeys := make(chan int)
+			a.keysChan = chKeys
+			a.cec.KeyPresses = chKeys
+			go a.pollKeys()
 
-		chMessages := make(chan string)
-		a.messagesChan = chMessages
-		c.Messages = chMessages
-		go a.pollMessages()
+			chMessages := make(chan string)
+			a.messagesChan = chMessages
+			a.cec.Messages = chMessages
+			go a.pollMessages()
+
+			time.Sleep(5 * time.Second)
+			log.Println("Transmit")
+			a.cec.Transmit("E0:84:10:00:04")
+			log.Println("Done: transmit")
+		}()
 	}
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
@@ -82,6 +92,7 @@ func main() {
 	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
 	}
+	a.cec.Destroy()
 }
 
 func nextView(g *gocui.Gui, v *gocui.View) error {
@@ -114,7 +125,7 @@ func setKeybindings(g *gocui.Gui, a *app) error {
 	if err := g.SetKeybinding("", 'q', gocui.ModNone, quit); err != nil {
 		return err
 	}
-	for _, v := range []string{"main", "side"} {
+	for _, v := range []string{"main", "side", "top"} {
 		if err := g.SetKeybinding(v, gocui.KeyArrowDown, gocui.ModNone, cursorDown); err != nil {
 			return err
 		}
@@ -213,6 +224,12 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 	return nil
 }
 
+func (a *app) refreshTop(v *gocui.View) error {
+	v.Clear()
+	fmt.Fprintln(v, "Plier: stuff goes here")
+	v.SetCursor(0, 0)
+	return nil
+}
 func (a *app) refreshSide(v *gocui.View) error {
 	files, err := ioutil.ReadDir(a.pwd)
 	if err != nil {
@@ -241,11 +258,31 @@ func (a *app) pollKeys() {
 	}
 }
 func (a *app) pollMessages() {
+	source := "10"
 	for c := range a.messagesChan {
 		if strings.HasPrefix(c, ">> ") {
 			log.Printf("plier - cec message rx: %+v", c)
 			parts := strings.Split(c[3:], ":")
-			if len(parts) == 3 {
+			switch len(parts) {
+			case 2:
+				switch parts[1] {
+				case "46":
+					log.Printf("Replying with OSD name - plier")
+					a.cec.Transmit(fmt.Sprintf("%s:47:70:6c:69:65:72", source))
+					//a.cec.Transmit("E0:84:10:00:04")
+				case "8c":
+					log.Printf("Replying with Vendor ID")
+					// vendor ID 12345
+					a.cec.Transmit(fmt.Sprintf("%s:87:00:30:39", source))
+				case "83":
+					log.Printf("Replying with Physical address")
+					// Reply with physical address (playback)
+					a.cec.Transmit(fmt.Sprintf("%s:84:10:00:04", source))
+				case "9f":
+					log.Printf("Reply with version 1.1")
+					a.cec.Transmit(fmt.Sprintf("%s:9E:00", source))
+				}
+			case 3:
 				switch parts[1] {
 				case "44":
 					log.Printf("Key pressed: %s", parts[2])
@@ -321,7 +358,17 @@ func (a *app) layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
 
 	sideWidth := maxX / 3
-	if v, err := g.SetView("side", 0, 0, sideWidth, maxY); err != nil {
+
+	if v, err := g.SetView("top", 0, 0, maxX, 5); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		v.Highlight = true
+		v.SelBgColor = gocui.ColorBlue
+		v.SelFgColor = gocui.ColorBlack
+		a.refreshTop(v)
+	}
+	if v, err := g.SetView("side", 0, 5, sideWidth, maxY); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
@@ -333,7 +380,7 @@ func (a *app) layout(g *gocui.Gui) error {
 			log.Panicln(err)
 		}
 	}
-	if v, err := g.SetView("main", sideWidth, 0, maxX-10, maxY); err != nil {
+	if v, err := g.SetView("main", sideWidth, 5, maxX-10, maxY); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
