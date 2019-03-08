@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/donniet/cec"
 	"github.com/jroimartin/gocui"
+	"github.com/laher/cec"
 )
 
 var (
@@ -27,6 +27,7 @@ type app struct {
 	writer       io.Writer
 	walkDir      bool
 	commandsChan chan *cec.Command
+	keysChan     chan int
 }
 
 func main() {
@@ -40,7 +41,7 @@ func main() {
 	if *useCec {
 		c, err := cec.Open("", "cec.go")
 		if err != nil {
-			log.Println("Error starting cec:", err)
+			log.Panicln("Error starting cec:", err)
 		}
 		if err == nil {
 			go c.PowerOn(0)
@@ -49,6 +50,11 @@ func main() {
 		a.commandsChan = ch
 		c.Commands = ch
 		go a.pollCommands()
+
+		chKeys := make(chan int)
+		a.keysChan = chKeys
+		c.KeyPresses = chKeys
+		go a.pollKeys()
 	}
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
@@ -220,6 +226,12 @@ func (a *app) refreshSide(v *gocui.View) error {
 func (a *app) pollCommands() {
 	for c := range a.commandsChan {
 		log.Printf("command: %+v", c)
+	}
+}
+
+func (a *app) pollKeys() {
+	for c := range a.keysChan {
+		log.Printf("key press: %+v", c)
 	}
 }
 
