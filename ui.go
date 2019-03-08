@@ -60,7 +60,7 @@ func main() {
 		chMessages := make(chan string)
 		a.messagesChan = chMessages
 		c.Messages = chMessages
-		go a.pollKeys()
+		go a.pollMessages()
 	}
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
