@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -39,10 +40,27 @@ func nextView(g *gocui.Gui, v *gocui.View) error {
 
 func setKeybindings(a *app) error {
 	g := a.g
-	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, a.quit); err != nil {
 		return err
 	}
-	if err := g.SetKeybinding("", 'q', gocui.ModNone, quit); err != nil {
+	if err := g.SetKeybinding("", 'q', gocui.ModNone, a.quit); err != nil {
+		return err
+	}
+
+	if err := g.SetKeybinding("", 'r', gocui.ModNone, a.reload); err != nil {
+		return err
+	}
+
+	if err := g.SetKeybinding("", 'p', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.report("pause via keypress")
+		return a.player.pause()
+	}); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding("", 's', gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.report("stop via keypress")
+		return a.player.stop()
+	}); err != nil {
 		return err
 	}
 	for _, v := range []string{"main", "side", "top"} {
@@ -59,10 +77,6 @@ func setKeybindings(a *app) error {
 			return err
 		}
 		if err := g.SetKeybinding(v, gocui.KeyEnter, gocui.ModNone, a.selectItem); err != nil {
-			return err
-		}
-
-		if err := g.SetKeybinding(v, gocui.KeyCtrlR, gocui.ModNone, a.reload); err != nil {
 			return err
 		}
 	}
@@ -95,29 +109,59 @@ func cursorUp(g *gocui.Gui, v *gocui.View) error {
 	return nil
 }
 
-var omxFiletypes = []string{".mkv", ".mp4", ".m4v", ".avi", "mp3"}
-
 func (a *app) queueReload() {
 	a.g.Update(func(g *gocui.Gui) error {
 		return a.reload(g, nil)
 	})
 }
 
+type button struct {
+	id      string
+	text    string
+	handler func(g *gocui.Gui, v *gocui.View) error
+}
+
+func (a *app) buttons() []button {
+	var buttons = []button{{
+		id:   "play",
+		text: "Play",
+		handler: func(g *gocui.Gui, v *gocui.View) error {
+			return a.player.play()
+		},
+	}, {
+		id:   "pause",
+		text: "Pause",
+		handler: func(g *gocui.Gui, v *gocui.View) error {
+			return a.player.pause()
+		},
+	}, {
+		id:   "stop",
+		text: "Stop",
+		handler: func(g *gocui.Gui, v *gocui.View) error {
+			return a.player.stop()
+		},
+	}}
+	return buttons
+}
 func (a *app) reload(g *gocui.Gui, _ *gocui.View) error {
 	t, _ := g.View("top")
 	err := a.refreshTop(t)
 	if err != nil {
 		return err
 	}
-	s, _ := g.View("side")
-	err = a.refreshSide(s)
-	if err != nil {
-		return err
-	}
-	m, _ := g.View("main")
-	err = a.refreshMain(m)
-	return err
-
+	/*
+		s, _ := g.View("side")
+		err = a.refreshSide(s)
+		if err != nil {
+			return err
+		}
+		m, _ := g.View("main")
+		err = a.refreshMain(m)
+		if err != nil {
+			return err
+		}
+	*/
+	return nil
 }
 
 func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
@@ -141,6 +185,8 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 						a.report(fmt.Sprintf("error stopping old item: %s", err))
 					}
 				}
+				ctx := context.Background()
+				go a.poll(ctx)
 				err := a.player.start(item)
 				if err != nil {
 					return err
@@ -186,7 +232,7 @@ func (a *app) refreshTop(v *gocui.View) error {
 		}
 	}
 	v.Clear()
-	fmt.Fprintf(v, "--- Plier --- [%s] [%d]\n", time.Now().Format("03:04:05"), len(a.lines))
+	fmt.Fprintf(v, "--- Plier [%s] ---\n", time.Now().Format("03:04:05"))
 	if len(a.lines) > 3 {
 		a.lines = a.lines[len(a.lines)-3:]
 	}
@@ -252,20 +298,22 @@ func (a *app) initCUI() {
 		log.Panicln(err)
 	}
 }
+
 func (a *app) layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
 
 	sideWidth := maxX / 3
 
-	if v, err := g.SetView("top", 0, 0, maxX, 5); err != nil {
+	if v, err := g.SetView("top", 0, 0, maxX-10, 5); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
 		v.Highlight = true
-		v.SelBgColor = gocui.ColorBlue
+		v.SelBgColor = gocui.ColorWhite
 		v.SelFgColor = gocui.ColorBlack
 		a.refreshTop(v)
 	}
+
 	if v, err := g.SetView("side", 0, 5, sideWidth, maxY); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
@@ -286,9 +334,25 @@ func (a *app) layout(g *gocui.Gui) error {
 		v.SelFgColor = gocui.ColorBlack
 		a.refreshMain(v)
 	}
+	for i, btn := range a.buttons() {
+		if v, err := g.SetView(btn.id, maxX-10, i*2, maxX, (2*i)+2); err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			v.Highlight = true
+			v.SelBgColor = gocui.ColorCyan
+			v.SelFgColor = gocui.ColorBlack
+			fmt.Fprintln(v, btn.text)
+
+			if err := g.SetKeybinding(btn.id, gocui.MouseLeft, gocui.ModNone, btn.handler); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
-func quit(g *gocui.Gui, v *gocui.View) error {
+func (a *app) quit(g *gocui.Gui, v *gocui.View) error {
+	go a.player.stop()
 	return gocui.ErrQuit
 }

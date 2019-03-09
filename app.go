@@ -44,7 +44,7 @@ func (a *app) walkMain(v io.Writer) error {
 		}
 		if !info.IsDir() && !strings.HasPrefix(info.Name(), ".") {
 			if *onlyMedia {
-				for _, ft := range omxFiletypes {
+				for _, ft := range a.player.filetypes {
 					if strings.HasSuffix(info.Name(), ft) {
 						fmt.Fprintln(v, path)
 						break

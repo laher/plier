@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os/exec"
 	"strings"
@@ -25,6 +26,12 @@ func (a *player) supports(item string) bool {
 }
 func (a *player) start(item string) error {
 	var err error
+	if a.cmd != nil {
+		err = a.stop()
+		if err != nil {
+			return err
+		}
+	}
 	a.cmd = exec.Command(a.exe, item)
 	a.writer, err = a.cmd.StdinPipe()
 	if err != nil {
@@ -39,21 +46,35 @@ func (a *player) start(item string) error {
 }
 
 func (a *player) ff() error {
+	if a.writer == nil {
+		return errNotPlaying
+	}
 	_, err := a.writer.Write([]byte("up"))
 	return err
 }
 
 func (a *player) rewind() error {
+	if a.writer == nil {
+		return errNotPlaying
+	}
 	_, err := a.writer.Write([]byte("dn"))
 	return err
 }
 
+var errNotPlaying = errors.New("Not playing")
+
 func (a *player) play() error {
+	if a.writer == nil {
+		return errNotPlaying
+	}
 	_, err := a.writer.Write([]byte("p"))
 	return err
 }
 
 func (a *player) pause() error {
+	if a.writer == nil {
+		return errNotPlaying
+	}
 	_, err := a.writer.Write([]byte("p"))
 	return err
 }

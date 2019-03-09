@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -9,6 +10,9 @@ import (
 	"github.com/laher/cec"
 )
 
+func (a *app) destroyCEC() {
+	//	a.cec.Destroy()
+}
 func (a *app) pollMessages() {
 	//source := "4f"
 	for c := range a.cec.Messages {
@@ -121,15 +125,24 @@ func (a *app) initCEC() {
 
 	time.Sleep(5 * time.Second)
 	a.cec.SetOSDString(0, "This is Plier")
+}
+
+func (a *app) poll(ctx context.Context) {
+	if !a.isCEC {
+		return
+	}
 	ticker := time.NewTicker(time.Second * 1)
 	defer ticker.Stop()
 	for {
-		<-ticker.C
-		log.Println("Poll device")
-		log.Println("---------------------------------")
-		a.cec.PollDevice(0)
-		//a.cec.Transmit("E0:84:10:00:04")
-		log.Println("---------------------------------")
-		log.Println("Done: poll device")
+		select {
+		case <-ticker.C:
+			log.Println("Poll device")
+			log.Println("---------------------------------")
+			a.cec.PollDevice(0)
+			log.Println("---------------------------------")
+			log.Println("Done: poll device")
+		case <-ctx.Done():
+			log.Println("Done: polling cancelled")
+		}
 	}
 }
