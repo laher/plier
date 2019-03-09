@@ -13,14 +13,11 @@ import (
 )
 
 type app struct {
-	pwd          string
-	writer       io.Writer
-	walkDir      bool
-	isCEC        bool
-	commandsChan chan *cec.Command
-	keysChan     chan int
-	messagesChan chan string
-	g            *gocui.Gui
+	pwd     string
+	writer  io.Writer
+	walkDir bool
+	isCEC   bool
+	g       *gocui.Gui
 
 	lines []string
 	cec   *cec.Connection

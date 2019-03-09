@@ -11,7 +11,7 @@ import (
 
 func (a *app) pollMessages() {
 	//source := "4f"
-	for c := range a.messagesChan {
+	for c := range a.cec.Messages {
 		if strings.HasPrefix(c, ">> ") {
 			log.Printf("plier - cec message rx: %+v", c)
 			parts := strings.Split(c[3:], ":")
@@ -79,7 +79,7 @@ func (a *app) pollMessages() {
 }
 
 func (a *app) pollCommands() {
-	for c := range a.commandsChan {
+	for c := range a.cec.Commands {
 		log.Printf("plier - cec command rx: %+v", c)
 	}
 }
@@ -92,7 +92,7 @@ func (a *app) setODSString() {
 }
 
 func (a *app) pollKeys() {
-	for c := range a.keysChan {
+	for c := range a.cec.KeyPresses {
 		log.Printf("**************************************************")
 		log.Printf("plier - key press rx: %+v", c)
 		log.Printf("**************************************************")
@@ -105,16 +105,13 @@ func (a *app) initCEC() {
 	if err != nil {
 		log.Panicln("Error starting cec. Try `-cec=false`:", err)
 	}
-	a.commandsChan = make(chan *cec.Command)
-	a.cec.Commands = a.commandsChan
+	a.cec.Commands = make(chan *cec.Command)
 	go a.pollCommands()
 
-	a.keysChan = make(chan int)
-	a.cec.KeyPresses = a.keysChan
+	a.cec.KeyPresses = make(chan int)
 	go a.pollKeys()
 
-	a.messagesChan = make(chan string)
-	a.cec.Messages = a.messagesChan
+	a.cec.Messages = make(chan string)
 	go a.pollMessages()
 
 	a.cec.PowerOn(0)
