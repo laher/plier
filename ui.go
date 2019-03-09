@@ -135,11 +135,18 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 				item = filepath.Join(a.pwd, item)
 			}
 			if a.player.supports(item) {
+				if a.player.cmd != nil {
+					err := a.player.stop()
+					if err != nil {
+						a.report(fmt.Sprintf("error stopping old item: %s", err))
+					}
+				}
 				err := a.player.start(item)
 				if err != nil {
 					return err
 				}
 			} else {
+				// todo: different command? can't remember if xdg-open is universal on raspbian
 				exe := "xdg-open"
 				err := exec.Command(exe, item).Run()
 				if err != nil {
