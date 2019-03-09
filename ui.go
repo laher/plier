@@ -30,8 +30,10 @@ type app struct {
 	commandsChan chan *cec.Command
 	keysChan     chan int
 	messagesChan chan string
+	g            *gocui.Gui
 
-	cec *cec.Connection
+	lines []string
+	cec   *cec.Connection
 }
 
 func main() {
@@ -48,9 +50,6 @@ func main() {
 			if err != nil {
 				log.Panicln("Error starting cec:", err)
 			}
-			if err == nil {
-				go a.cec.PowerOn(0)
-			}
 			ch := make(chan *cec.Command)
 			a.commandsChan = ch
 			a.cec.Commands = ch
@@ -66,17 +65,28 @@ func main() {
 			a.cec.Messages = chMessages
 			go a.pollMessages()
 
+			a.cec.PowerOn(0)
+
 			time.Sleep(5 * time.Second)
-			log.Println("Transmit")
-			a.cec.Transmit("E0:84:10:00:04")
-			log.Println("Done: transmit")
+			a.cec.SetOSDString(0, "This is Plier")
+			ticker := time.NewTicker(time.Second * 1)
+			defer ticker.Stop()
+			for {
+				<-ticker.C
+				log.Println("Poll device")
+				log.Println("---------------------------------")
+				a.cec.PollDevice(0)
+				//a.cec.Transmit("E0:84:10:00:04")
+				log.Println("---------------------------------")
+				log.Println("Done: poll device")
+			}
 		}()
 	}
-	g, err := gocui.NewGui(gocui.OutputNormal)
+	a.g, err = gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
 		log.Panicln(err)
 	}
-	defer g.Close()
+	defer a.g.Close()
 	if len(flag.Args()) > 0 {
 		a.pwd = flag.Args()[0]
 	} else {
@@ -85,11 +95,11 @@ func main() {
 			log.Panicln(err)
 		}
 	}
-	g.SetManagerFunc(a.layout)
-	if err := setKeybindings(g, a); err != nil {
+	a.g.SetManagerFunc(a.layout)
+	if err := setKeybindings(a); err != nil {
 		log.Panicln(err)
 	}
-	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
+	if err := a.g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
 	}
 	a.cec.Destroy()
@@ -118,7 +128,8 @@ func nextView(g *gocui.Gui, v *gocui.View) error {
 	return err
 }
 
-func setKeybindings(g *gocui.Gui, a *app) error {
+func setKeybindings(a *app) error {
+	g := a.g
 	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		return err
 	}
@@ -139,6 +150,10 @@ func setKeybindings(g *gocui.Gui, a *app) error {
 			return err
 		}
 		if err := g.SetKeybinding(v, gocui.KeyEnter, gocui.ModNone, a.selectItem); err != nil {
+			return err
+		}
+
+		if err := g.SetKeybinding(v, gocui.KeyCtrlR, gocui.ModNone, a.reload); err != nil {
 			return err
 		}
 	}
@@ -173,6 +188,29 @@ func cursorUp(g *gocui.Gui, v *gocui.View) error {
 
 var omxFiletypes = []string{".mkv", ".mp4", ".m4v", ".avi", "mp3"}
 
+func (a *app) queueReload() {
+	a.g.Update(func(g *gocui.Gui) error {
+		return a.reload(g, nil)
+	})
+}
+
+func (a *app) reload(g *gocui.Gui, _ *gocui.View) error {
+	t, _ := g.View("top")
+	err := a.refreshTop(t)
+	if err != nil {
+		return err
+	}
+	s, _ := g.View("side")
+	err = a.refreshSide(s)
+	if err != nil {
+		return err
+	}
+	m, _ := g.View("main")
+	err = a.refreshMain(m)
+	return err
+
+}
+
 func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 	if v != nil {
 		switch v.Name() {
@@ -190,6 +228,9 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 			}
 			if !a.walkDir {
 				item = filepath.Join(a.pwd, item)
+			}
+			if a.cec != nil {
+				a.cec.SetOSDString(0, "This is Plier")
 			}
 			cmd := exec.Command(exe, item)
 			a.writer, err = cmd.StdinPipe()
@@ -225,8 +266,21 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 }
 
 func (a *app) refreshTop(v *gocui.View) error {
+	if v == nil {
+		var err error
+		v, err = a.g.View("top")
+		if err != nil {
+			return err
+		}
+	}
 	v.Clear()
-	fmt.Fprintln(v, "Plier: stuff goes here")
+	fmt.Fprintf(v, "--- Plier --- [%s] [%d]\n", time.Now().Format("03:04:05"), len(a.lines))
+	if len(a.lines) > 3 {
+		a.lines = a.lines[len(a.lines)-3:]
+	}
+	for _, line := range a.lines {
+		fmt.Fprintln(v, line)
+	}
 	v.SetCursor(0, 0)
 	return nil
 }
@@ -254,43 +308,81 @@ func (a *app) pollCommands() {
 
 func (a *app) pollKeys() {
 	for c := range a.keysChan {
+		log.Printf("**************************************************", c)
 		log.Printf("plier - key press rx: %+v", c)
+		log.Printf("**************************************************", c)
 	}
 }
+
+func (a *app) report(line string) {
+	a.lines = append(a.lines, line)
+	a.queueReload()
+}
+
 func (a *app) pollMessages() {
-	source := "10"
+	//source := "4f"
 	for c := range a.messagesChan {
 		if strings.HasPrefix(c, ">> ") {
 			log.Printf("plier - cec message rx: %+v", c)
 			parts := strings.Split(c[3:], ":")
-			switch len(parts) {
-			case 2:
-				switch parts[1] {
-				case "46":
-					log.Printf("Replying with OSD name - plier")
-					a.cec.Transmit(fmt.Sprintf("%s:47:70:6c:69:65:72", source))
-					//a.cec.Transmit("E0:84:10:00:04")
-				case "8c":
-					log.Printf("Replying with Vendor ID")
-					// vendor ID 12345
-					a.cec.Transmit(fmt.Sprintf("%s:87:00:30:39", source))
-				case "83":
-					log.Printf("Replying with Physical address")
-					// Reply with physical address (playback)
-					a.cec.Transmit(fmt.Sprintf("%s:84:10:00:04", source))
-				case "9f":
-					log.Printf("Reply with version 1.1")
-					a.cec.Transmit(fmt.Sprintf("%s:9E:00", source))
+			if len(parts) < 2 {
+				// not a 'receive': ignore
+				continue
+			}
+			switch parts[1] {
+			case "8b":
+				log.Printf("Vendor button up: %s", parts[2])
+				a.report(fmt.Sprintf("vendor button up: %s", parts[2]))
+			case "44":
+				log.Printf("KEY PRESSED: %s", parts[2])
+				switch parts[2] {
+				case "44": // play
+					if _, err := a.writer.Write([]byte("p")); err != nil {
+						panic(err)
+					}
+				case "46": // pause
+					if _, err := a.writer.Write([]byte("p")); err != nil {
+						panic(err)
+					}
+				case "45": // stop
+					a.report("stop")
+				case "49": // ff
+					a.report("fast-forward")
+				case "48": // rw
+					a.report("rewind")
+				case "4b": // f
+					a.report("forward")
+				case "4c": // b
+					a.report("back")
+				case "01": // up
+					a.report("up")
+				case "02": // down
+					a.report("down")
+				case "03": // left
+					a.report("left")
+				case "04": // right
+					a.report("right")
+				default:
+					a.report(fmt.Sprintf("key unhandled: %s", parts[2]))
 				}
-			case 3:
-				switch parts[1] {
-				case "44":
-					log.Printf("Key pressed: %s", parts[2])
-				case "45":
-					log.Printf("Key released: %s", parts[2])
-				case "82":
-					log.Printf("Active source: %s", parts[2])
-				}
+			case "46":
+				log.Printf("Requested OSD name - plier")
+			//	a.cec.Transmit(fmt.Sprintf("%s:47:70:6c:69:65:72", source))
+			case "8c":
+				log.Printf("Requested Vendor ID 1582")
+				// vendor ID 1582 (Pulse Eight)
+			//	a.cec.Transmit(fmt.Sprintf("%s:87:00:15:82", source))
+			case "83":
+				log.Printf("Requested Physical address")
+				// Reply with physical address (playback)
+			//	a.cec.Transmit(fmt.Sprintf("%s:84:10:00:04", source))
+			case "9f":
+				log.Printf("Requested version")
+			//	a.cec.Transmit(fmt.Sprintf("%s:9E:00", source))
+			case "45":
+				log.Printf("Key released: %s", parts[2])
+			case "82":
+				log.Printf("Active source: %s", parts[2])
 			}
 		}
 	}
