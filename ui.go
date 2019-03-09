@@ -128,26 +128,25 @@ func (a *app) selectItem(g *gocui.Gui, v *gocui.View) error {
 			item, err := v.Line(y)
 			if err != nil {
 				return err
+
 			}
-			exe := "xdg-open"
-			for _, ft := range omxFiletypes {
-				if strings.HasSuffix(item, ft) {
-					exe = *mediaPlayer
-				}
-			}
+
 			if !a.walkDir {
 				item = filepath.Join(a.pwd, item)
 			}
-			cmd := exec.Command(exe, item)
-			a.writer, err = cmd.StdinPipe()
-			if err != nil {
-				return err
+			if a.player.supports(item) {
+				err := a.player.start(item)
+				if err != nil {
+					return err
+				}
+			} else {
+				exe := "xdg-open"
+				err := exec.Command(exe, item).Run()
+				if err != nil {
+					return err
+				}
 			}
 
-			err = cmd.Start()
-			if err != nil {
-				return err
-			}
 		case "side":
 			_, y := v.Cursor()
 			item, err := v.Line(y)

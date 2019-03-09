@@ -14,9 +14,9 @@ import (
 
 type app struct {
 	pwd     string
-	writer  io.Writer
 	walkDir bool
 	isCEC   bool
+	player  *player
 	g       *gocui.Gui
 
 	lines []string

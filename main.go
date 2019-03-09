@@ -21,7 +21,9 @@ func main() {
 		log.Panicln(err)
 	}
 	log.SetOutput(w)
-	a := &app{walkDir: *walkDir}
+	a := &app{walkDir: *walkDir, player: &player{
+		exe: *mediaPlayer,
+	}}
 	if *useCec {
 		go a.initCEC()
 		defer a.cec.Destroy()

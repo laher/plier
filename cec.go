@@ -27,15 +27,18 @@ func (a *app) pollMessages() {
 				log.Printf("KEY PRESSED: %s", parts[2])
 				switch parts[2] {
 				case "44": // play
-					if _, err := a.writer.Write([]byte("p")); err != nil {
+					if err := a.player.play(); err != nil {
 						panic(err)
 					}
 				case "46": // pause
-					if _, err := a.writer.Write([]byte("p")); err != nil {
+					if err := a.player.pause(); err != nil {
 						panic(err)
 					}
 				case "45": // stop
 					a.report("stop")
+					if err := a.player.stop(); err != nil {
+						panic(err)
+					}
 				case "49": // ff
 					a.report("fast-forward")
 				case "48": // rw
